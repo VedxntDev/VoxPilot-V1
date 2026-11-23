@@ -1,0 +1,542 @@
+import { ConfirmationDetails, RouterExecutionResult } from './types'
+
+/**
+ * Normalizes input voice command strings without destroying dots in domains.
+ */
+function cleanCommand(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/^hey vox,?\s*/i, '')
+    .replace(/^vox,?\s*/i, '')
+    .replace(/[?!;]+$/g, '')
+    .trim()
+}
+
+/**
+ * Detects domain names like msrit.edu, google.com, portal.ac.in, etc.
+ */
+const DOMAIN_REGEX = /\b([a-zA-Z0-9-]+\.(?:edu|com|org|in|net|io|gov|ai|co|ac\.in|co\.in|org\.in|edu\.in|me))\b/i
+
+/**
+ * Finds if an existing tab matching query or URL already exists.
+ * Helps prevent duplicate tabs.
+ */
+async function findExistingTab(query: string): Promise<chrome.tabs.Tab | null> {
+  if (typeof chrome === 'undefined' || !chrome.tabs?.query) {
+    return null
+  }
+  try {
+    const tabs = await chrome.tabs.query({})
+    const q = query.toLowerCase()
+    return (
+      tabs.find((tab) => {
+        const url = (tab.url || '').toLowerCase()
+        const title = (tab.title || '').toLowerCase()
+        return url.includes(q) || title.includes(q)
+      }) || null
+    )
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Known YouTube creator handles.
+ */
+const KNOWN_CHANNELS: Record<string, string> = {
+  mrbeast: 'https://www.youtube.com/@MrBeast',
+  'mr beast': 'https://www.youtube.com/@MrBeast',
+  mkbhd: 'https://www.youtube.com/@mkbhd',
+  'marques brownlee': 'https://www.youtube.com/@mkbhd',
+  veritasium: 'https://www.youtube.com/@veritasium',
+  pewdiepie: 'https://www.youtube.com/@PewDiePie',
+  kurzgesagt: 'https://www.youtube.com/@inanutshell',
+  fireship: 'https://www.youtube.com/@Fireship',
+  lex: 'https://www.youtube.com/@lexfridman',
+  'lex fridman': 'https://www.youtube.com/@lexfridman',
+  huberman: 'https://www.youtube.com/@hubermanlab',
+  'huberman lab': 'https://www.youtube.com/@hubermanlab',
+}
+
+/**
+ * Sub-150 ms Local Fast-Path Router
+ * Handles deterministic intent with zero network roundtrips.
+ */
+export async function routeFastPath(rawCommand: string): Promise<RouterExecutionResult> {
+  const startTime = performance.now()
+  const cmd = cleanCommand(rawCommand)
+
+  // 1. DIRECT DOMAIN & URL NAVIGATION (e.g. "open msrit.edu", "msrit.edu", "go to github.com")
+  // Prevents sending valid websites to Google Search
+  const domainMatch = cmd.match(DOMAIN_REGEX)
+  if (domainMatch || cmd.includes('msrit')) {
+    let domain = domainMatch ? domainMatch[1] : 'msrit.edu'
+
+    // Special handling for MSRIT / Ramaiah student portals
+    let targetUrl = `https://${domain}`
+    let targetTitle = domain
+
+    if (cmd.includes('student') || cmd.includes('portal') || cmd.includes('login') || cmd.includes('sis') || cmd.includes('erp')) {
+      if (domain.includes('msrit')) {
+        targetUrl = 'https://parents.msrit.edu'
+        targetTitle = 'MSRIT Student Academic Portal'
+      }
+    } else if (domain === 'msrit.edu' || cmd === 'open msrit' || cmd === 'msrit') {
+      targetUrl = 'https://www.msrit.edu'
+      targetTitle = 'Ramaiah Institute of Technology (MSRIT)'
+    }
+
+    // Check if matching tab already exists
+    const existing = await findExistingTab(domain)
+    if (existing && existing.id !== undefined) {
+      if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
+        await chrome.tabs.update(existing.id, { active: true })
+        if (existing.windowId) {
+          await chrome.windows.update(existing.windowId, { focused: true })
+        }
+      }
+
+      // Check if user requested login in the same breath (Tier 3 Complication trigger)
+      if (cmd.includes('login') || cmd.includes('sign in')) {
+        return {
+          handled: true,
+          isFastPath: true,
+          tier: 'tier3',
+          actionName: 'navigated_login_portal',
+          statusMessage: `Switched to ${targetTitle}. Paused for credential entry.`,
+          spokenFeedback: `Switched to ${targetTitle}. Manual login required.`,
+          complication: {
+            type: 'login_wall',
+            reason: 'Student portal authentication required. Enter your credentials to continue.',
+            stepIndex: 1,
+            totalSteps: 2,
+          },
+          timeMs: Math.round(performance.now() - startTime),
+        }
+      }
+
+      return {
+        handled: true,
+        isFastPath: true,
+        tier: 'tier1',
+        actionName: 'switch_to_domain',
+        statusMessage: `Switched to open tab: ${targetTitle}`,
+        spokenFeedback: `Switched to ${targetTitle}.`,
+        timeMs: Math.round(performance.now() - startTime),
+      }
+    }
+
+    // Open the website directly in active tab
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      await chrome.tabs.create({ url: targetUrl, active: true })
+    }
+
+    // If user asked to login in student portal
+    if (cmd.includes('login') || cmd.includes('sign in')) {
+      return {
+        handled: true,
+        isFastPath: true,
+        tier: 'tier3',
+        actionName: 'open_and_login_portal',
+        statusMessage: `Opened ${targetTitle}. Authentication required.`,
+        spokenFeedback: `Opened ${targetTitle}. Please log in on the page and click Resume.`,
+        complication: {
+          type: 'login_wall',
+          reason: 'Student portal login required. Please sign in to proceed.',
+          stepIndex: 1,
+          totalSteps: 2,
+        },
+        timeMs: Math.round(performance.now() - startTime),
+      }
+    }
+
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'open_direct_domain',
+      statusMessage: `Navigated directly to ${targetTitle} (${targetUrl})`,
+      spokenFeedback: `Opening ${targetTitle}.`,
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 2. YouTube specific commands (channels, searches, creator pages)
+  if (cmd.includes('youtube') || cmd.includes('mrbeast') || cmd.includes('mr beast')) {
+    let targetUrl = 'https://www.youtube.com'
+    let targetLabel = 'YouTube'
+
+    if (cmd.includes('mrbeast') || cmd.includes('mr beast')) {
+      targetUrl = 'https://www.youtube.com/@MrBeast'
+      targetLabel = 'MrBeast YouTube Channel'
+    } else {
+      for (const [name, url] of Object.entries(KNOWN_CHANNELS)) {
+        if (cmd.includes(name)) {
+          targetUrl = url
+          targetLabel = `${name} on YouTube`
+          break
+        }
+      }
+
+      if (targetUrl === 'https://www.youtube.com') {
+        const query = cmd
+          .replace(/open|search|play|watch|channel|on youtube|youtube/gi, '')
+          .trim()
+
+        if (query) {
+          targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
+          targetLabel = `YouTube search for "${query}"`
+        }
+      }
+    }
+
+    const existing = await findExistingTab(targetLabel.toLowerCase())
+    if (existing && existing.id !== undefined) {
+      if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
+        await chrome.tabs.update(existing.id, { active: true })
+        if (existing.windowId) {
+          await chrome.windows.update(existing.windowId, { focused: true })
+        }
+      }
+      return {
+        handled: true,
+        isFastPath: true,
+        tier: 'tier1',
+        actionName: 'switch_to_youtube',
+        statusMessage: `Switched to open tab: ${targetLabel}`,
+        spokenFeedback: `Switched to ${targetLabel}.`,
+        timeMs: Math.round(performance.now() - startTime),
+      }
+    }
+
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      await chrome.tabs.create({ url: targetUrl, active: true })
+    }
+
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'open_youtube_destination',
+      statusMessage: `Navigated to ${targetLabel}`,
+      spokenFeedback: `Opening ${targetLabel}.`,
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 3. Open Wordle (Deduplicate if already open)
+  if (cmd.includes('open wordle') || cmd === 'wordle') {
+    const wordleUrl = 'https://www.nytimes.com/games/wordle/index.html'
+    const existing = await findExistingTab('wordle')
+
+    if (existing && existing.id !== undefined) {
+      if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
+        await chrome.tabs.update(existing.id, { active: true })
+        if (existing.windowId) {
+          await chrome.windows.update(existing.windowId, { focused: true })
+        }
+      }
+      return {
+        handled: true,
+        isFastPath: true,
+        tier: 'tier1',
+        actionName: 'switch_to_wordle',
+        statusMessage: 'Switched to existing Wordle tab',
+        spokenFeedback: 'Wordle is already open. Switched to it.',
+        timeMs: Math.round(performance.now() - startTime),
+      }
+    }
+
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      await chrome.tabs.create({ url: wordleUrl, active: true })
+    }
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'open_wordle',
+      statusMessage: 'Opened Wordle in a new tab',
+      spokenFeedback: 'Opening Wordle.',
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 4. Open History
+  if (cmd === 'open history' || cmd === 'view history' || cmd === 'show history') {
+    const historyUrl = 'chrome://history'
+    const existing = await findExistingTab('chrome://history')
+
+    if (existing && existing.id !== undefined) {
+      if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
+        await chrome.tabs.update(existing.id, { active: true })
+      }
+      return {
+        handled: true,
+        isFastPath: true,
+        tier: 'tier1',
+        actionName: 'switch_history',
+        statusMessage: 'Switched to open History tab',
+        spokenFeedback: 'Switched to your history tab.',
+        timeMs: Math.round(performance.now() - startTime),
+      }
+    }
+
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      await chrome.tabs.create({ url: historyUrl, active: true })
+    }
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'open_history',
+      statusMessage: 'Opened Chrome History',
+      spokenFeedback: 'Opening history.',
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 5. Web Search Queries (ONLY when explicitly searching)
+  if (cmd.startsWith('search for ') || cmd.startsWith('google ')) {
+    const query = cmd
+      .replace(/^search for\s*/i, '')
+      .replace(/^google\s*/i, '')
+      .trim()
+
+    if (query) {
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`
+      if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+        await chrome.tabs.create({ url: searchUrl, active: true })
+      }
+      return {
+        handled: true,
+        isFastPath: true,
+        tier: 'tier1',
+        actionName: 'web_search',
+        statusMessage: `Searching Google for: "${query}"`,
+        spokenFeedback: `Searching for ${query}.`,
+        timeMs: Math.round(performance.now() - startTime),
+      }
+    }
+  }
+
+  // 6. Close Current Tab
+  if (cmd === 'close current tab' || cmd === 'close this tab' || cmd === 'close tab') {
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.remove) {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (activeTab?.id) {
+        await chrome.tabs.remove(activeTab.id)
+      }
+    }
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'close_current_tab',
+      statusMessage: 'Closed active tab',
+      spokenFeedback: 'Closed tab.',
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 7. Mute / Unmute YouTube or active audio tab
+  if (cmd.includes('mute youtube') || cmd === 'mute audio' || cmd === 'mute current tab') {
+    let mutedCount = 0
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.update) {
+      const targetTabs = await chrome.tabs.query({ audible: true })
+      for (const tab of targetTabs) {
+        if (tab.id) {
+          await chrome.tabs.update(tab.id, { muted: true })
+          mutedCount++
+        }
+      }
+      if (mutedCount === 0) {
+        const [active] = await chrome.tabs.query({ active: true, currentWindow: true })
+        if (active?.id) {
+          await chrome.tabs.update(active.id, { muted: true })
+          mutedCount++
+        }
+      }
+    }
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'mute_tab',
+      statusMessage: mutedCount > 0 ? `Muted ${mutedCount} audio tab(s)` : 'Muted current tab',
+      spokenFeedback: 'Muted audio.',
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  if (cmd.includes('unmute youtube') || cmd === 'unmute audio' || cmd === 'unmute tab') {
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.update) {
+      const tabs = await chrome.tabs.query({ muted: true })
+      for (const tab of tabs) {
+        if (tab.id) {
+          await chrome.tabs.update(tab.id, { muted: false })
+        }
+      }
+    }
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'unmute_tab',
+      statusMessage: 'Unmuted active audio tabs',
+      spokenFeedback: 'Unmuted.',
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 8. Switch to Tab
+  if (cmd.startsWith('switch to tab') || cmd.startsWith('switch to')) {
+    const target = cmd.replace(/^switch to tab\s*/, '').replace(/^switch to\s*/, '').trim()
+    if (target) {
+      const existing = await findExistingTab(target)
+      if (existing && existing.id !== undefined) {
+        if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
+          await chrome.tabs.update(existing.id, { active: true })
+          if (existing.windowId) {
+            await chrome.windows.update(existing.windowId, { focused: true })
+          }
+        }
+        return {
+          handled: true,
+          isFastPath: true,
+          tier: 'tier1',
+          actionName: 'switch_tab',
+          statusMessage: `Switched to tab: ${existing.title || target}`,
+          spokenFeedback: `Switched to ${target}.`,
+          timeMs: Math.round(performance.now() - startTime),
+        }
+      }
+    }
+  }
+
+  // 9. Generic deduplicated quick open for common apps
+  const quickApps: Record<string, string> = {
+    github: 'https://github.com',
+    google: 'https://www.google.com',
+    mail: 'https://mail.google.com',
+    gmail: 'https://mail.google.com',
+    calendar: 'https://calendar.google.com',
+    twitter: 'https://twitter.com',
+    x: 'https://x.com',
+    reddit: 'https://www.reddit.com',
+    spotify: 'https://open.spotify.com',
+    netflix: 'https://www.netflix.com',
+    twitch: 'https://www.twitch.tv',
+    amazon: 'https://www.amazon.com',
+  }
+
+  for (const [appKey, appUrl] of Object.entries(quickApps)) {
+    if (cmd === `open ${appKey}` || cmd === `go to ${appKey}` || cmd === appKey) {
+      const existing = await findExistingTab(appKey)
+      if (existing && existing.id !== undefined) {
+        if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
+          await chrome.tabs.update(existing.id, { active: true })
+        }
+        return {
+          handled: true,
+          isFastPath: true,
+          tier: 'tier1',
+          actionName: `switch_${appKey}`,
+          statusMessage: `Focused existing ${appKey} tab`,
+          spokenFeedback: `Switched to ${appKey}.`,
+          timeMs: Math.round(performance.now() - startTime),
+        }
+      }
+
+      if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+        await chrome.tabs.create({ url: appUrl, active: true })
+      }
+      return {
+        handled: true,
+        isFastPath: true,
+        tier: 'tier1',
+        actionName: `open_${appKey}`,
+        statusMessage: `Opened ${appKey}`,
+        spokenFeedback: `Opening ${appKey}.`,
+        timeMs: Math.round(performance.now() - startTime),
+      }
+    }
+  }
+
+  // 10. Destructive actions inspection (Tier 2 Trigger)
+  if (cmd.includes('close all other tabs') || cmd === 'close other tabs') {
+    let tabCount = 0
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
+      const tabs = await chrome.tabs.query({ currentWindow: true })
+      tabCount = Math.max(0, tabs.length - 1)
+    } else {
+      tabCount = 8
+    }
+
+    const confirmation: ConfirmationDetails = {
+      title: 'Confirm Closing Tabs',
+      description: `This action will close ${tabCount} background tabs in the current window.`,
+      itemCount: tabCount,
+      target: `${tabCount} background tabs`,
+      requiresTypeToConfirm: false,
+      actionType: 'close_tabs',
+      payload: { mode: 'other_tabs' },
+    }
+
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier2',
+      actionName: 'close_other_tabs',
+      statusMessage: `Confirmation needed to close ${tabCount} tabs`,
+      spokenFeedback: `This will close ${tabCount} tabs. Please confirm in the side panel.`,
+      requiresConfirmation: true,
+      confirmation,
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  if (cmd.includes('clear all history') || cmd.includes('delete all history') || cmd === 'wipe history') {
+    let historyCount = 0
+    if (typeof chrome !== 'undefined' && chrome.history?.search) {
+      const items = await chrome.history.search({ text: '', startTime: 0, maxResults: 1000 })
+      historyCount = items.length
+    } else {
+      historyCount = 142
+    }
+
+    const confirmation: ConfirmationDetails = {
+      title: 'Confirm History Deletion',
+      description: `This action will permanently delete all browsing records (${historyCount} items detected). Type "DELETE" below to confirm.`,
+      itemCount: historyCount,
+      target: 'Entire browsing history',
+      requiresTypeToConfirm: true,
+      phraseToType: 'DELETE',
+      actionType: 'delete_history',
+      payload: { range: 'all' },
+    }
+
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier2',
+      actionName: 'delete_all_history',
+      statusMessage: `Confirmation needed to delete ${historyCount} history items`,
+      spokenFeedback: `Full wipe detected for ${historyCount} items. Type confirmation required.`,
+      requiresConfirmation: true,
+      confirmation,
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // Not handled by fast path: delegate to LLM slow-path orchestrator
+  return {
+    handled: false,
+    isFastPath: false,
+    tier: 'tier1',
+    actionName: 'delegate_to_llm',
+    statusMessage: 'Routing to semantic LLM orchestrator',
+    spokenFeedback: '',
+    timeMs: Math.round(performance.now() - startTime),
+  }
+}

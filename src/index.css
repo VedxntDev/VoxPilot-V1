@@ -1,0 +1,123 @@
+@import '@fontsource-variable/manrope';
+@import '@fontsource-variable/montserrat';
+@import '@fontsource-variable/onest';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.625rem;
+    --background: #ffffff;
+    --foreground: #0a0a0a;
+    --card: #ffffff;
+    --card-foreground: #0a0a0a;
+    --popover: #ffffff;
+    --popover-foreground: #0a0a0a;
+    --primary: #171717;
+    --primary-foreground: #fafafa;
+    --secondary: #f5f5f5;
+    --secondary-foreground: #171717;
+    --muted: #f5f5f5;
+    --muted-foreground: #737373;
+    --accent: #f5f5f5;
+    --accent-foreground: #171717;
+    --destructive: #dc2626;
+    --border: #e5e5e5;
+    --input: #e5e5e5;
+    --ring: #a3a3a3;
+    --brand: #ea580c;
+    --highlight: #854d0e;
+    --card-edge: rgba(120, 53, 15, 0.15);
+    --card-edge-hover: rgba(120, 53, 15, 0.25);
+    --card-fill: rgba(255, 255, 255, 0.7);
+  }
+
+  .dark {
+    --radius: 0.625rem;
+    --background: #0a0a0a;
+    --foreground: #fafafa;
+    --card: #141414;
+    --card-foreground: #fafafa;
+    --popover: #141414;
+    --popover-foreground: #fafafa;
+    --primary: #ededed;
+    --primary-foreground: #0a0a0a;
+    --secondary: #262626;
+    --secondary-foreground: #fafafa;
+    --muted: #262626;
+    --muted-foreground: #a3a3a3;
+    --accent: #262626;
+    --accent-foreground: #fafafa;
+    --destructive: #ef4444;
+    --border: rgba(255, 255, 255, 0.1);
+    --input: rgba(255, 255, 255, 0.15);
+    --ring: #737373;
+    --brand: #f97316;
+    --highlight: #ffedd5;
+    --card-edge: rgba(255, 247, 237, 0.15);
+    --card-edge-hover: rgba(255, 247, 237, 0.3);
+    --card-fill: rgba(0, 0, 0, 0.15);
+  }
+
+  * {
+    border-color: var(--border);
+    box-shadow: none !important;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: 'Manrope Variable', 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    overflow-x: hidden;
+  }
+}
+
+.highlight {
+  font-family: 'Montserrat Variable', 'Montserrat', sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  text-transform: capitalize;
+  color: var(--highlight);
+}
+
+.btn-asym {
+  border-radius: 0 var(--radius) 0 var(--radius);
+}
+
+.btn-asym-mirror {
+  border-radius: var(--radius) 0 var(--radius) 0;
+}
+
+.card-chai {
+  border-radius: calc(var(--radius) + 4px);
+  border: 1px solid var(--card-edge);
+  background: var(--card-fill);
+  backdrop-filter: blur(4px);
+  box-shadow: none !important;
+  transition: border-color 300ms, opacity 300ms;
+}
+
+.card-chai:hover {
+  border-color: var(--card-edge-hover);
+}
+
+/* Custom scrollbar for narrow sidepanel */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(163, 163, 163, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(163, 163, 163, 0.4);
+}
