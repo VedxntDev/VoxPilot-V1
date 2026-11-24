@@ -21,6 +21,14 @@ export interface ComplicationDetails {
   resumePayload?: any
 }
 
+export interface ProductComparisonItem {
+  title: string
+  price: string
+  specs: string[]
+  verdict: string
+  url: string
+}
+
 export interface RouterExecutionResult {
   handled: boolean
   isFastPath: boolean
@@ -69,9 +77,15 @@ export interface PageSnapshot {
 }
 
 export interface ExtensionSettings {
+  aiBrain: 'bedrock' | 'gemini' | 'local'
+  bedrockModel: string
+  awsProxyUrl: string
+  elevenLabsApiKey: string
+  elevenLabsVoiceId: string
   geminiApiKey: string
   geminiModel: string
   ttsVoiceEnabled: boolean
   bargeInEnabled: boolean
   wakeWordEnabled: boolean
+  whisperEndpoint?: string
 }

@@ -47,6 +47,8 @@ async function findExistingTab(query: string): Promise<chrome.tabs.Tab | null> {
 const KNOWN_CHANNELS: Record<string, string> = {
   mrbeast: 'https://www.youtube.com/@MrBeast',
   'mr beast': 'https://www.youtube.com/@MrBeast',
+  sidemen: 'https://www.youtube.com/results?search_query=latest+sidemen+video',
+  'sidemen video': 'https://www.youtube.com/results?search_query=latest+sidemen+video',
   mkbhd: 'https://www.youtube.com/@mkbhd',
   'marques brownlee': 'https://www.youtube.com/@mkbhd',
   veritasium: 'https://www.youtube.com/@veritasium',
@@ -67,8 +69,86 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
   const startTime = performance.now()
   const cmd = cleanCommand(rawCommand)
 
-  // 1. DIRECT DOMAIN & URL NAVIGATION (e.g. "open msrit.edu", "msrit.edu", "go to github.com")
-  // Prevents sending valid websites to Google Search
+  // 1. Media Micro-Controls: Skip Ad
+  if (cmd === 'skip ad' || cmd === 'skip ads' || cmd === 'skip the ad' || cmd === 'skip') {
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.scripting?.executeScript) {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (activeTab?.id) {
+        await chrome.scripting.executeScript({
+          target: { tabId: activeTab.id },
+          func: () => {
+            const btn = document.querySelector(
+              '.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern, button.ytp-ad-skip-button-text, .videoAdUiSkipButton',
+            ) as HTMLElement | null
+            if (btn) btn.click()
+          },
+        }).catch(() => {})
+      }
+    }
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'skip_ad',
+      statusMessage: 'Skipped YouTube advertisement',
+      spokenFeedback: '',
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 2. Media Micro-Controls: Pause Video
+  if (cmd === 'pause' || cmd === 'pause video' || cmd === 'stop video') {
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.scripting?.executeScript) {
+      const audibleTabs = await chrome.tabs.query({ audible: true })
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      const targetTab = audibleTabs[0] || activeTab
+      if (targetTab?.id) {
+        await chrome.scripting.executeScript({
+          target: { tabId: targetTab.id },
+          func: () => {
+            const v = document.querySelector('video')
+            if (v) v.pause()
+          },
+        }).catch(() => {})
+      }
+    }
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'pause_media',
+      statusMessage: 'Paused video playback',
+      spokenFeedback: '',
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 3. Media Micro-Controls: Play / Resume Video
+  if (cmd === 'play' || cmd === 'resume' || cmd === 'resume video' || cmd === 'play video') {
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.scripting?.executeScript) {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (activeTab?.id) {
+        await chrome.scripting.executeScript({
+          target: { tabId: activeTab.id },
+          func: () => {
+            const v = document.querySelector('video')
+            if (v) v.play()
+          },
+        }).catch(() => {})
+      }
+    }
+    return {
+      handled: true,
+      isFastPath: true,
+      tier: 'tier1',
+      actionName: 'play_media',
+      statusMessage: 'Resumed video playback',
+      spokenFeedback: '',
+      timeMs: Math.round(performance.now() - startTime),
+    }
+  }
+
+  // 4. DIRECT DOMAIN & URL NAVIGATION (e.g. "open msrit.edu", "msrit.edu", "go to github.com")
   const domainMatch = cmd.match(DOMAIN_REGEX)
   if (domainMatch || cmd.includes('msrit')) {
     let domain = domainMatch ? domainMatch[1] : 'msrit.edu'
@@ -97,7 +177,6 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
         }
       }
 
-      // Check if user requested login in the same breath (Tier 3 Complication trigger)
       if (cmd.includes('login') || cmd.includes('sign in')) {
         return {
           handled: true,
@@ -122,7 +201,7 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
         tier: 'tier1',
         actionName: 'switch_to_domain',
         statusMessage: `Switched to open tab: ${targetTitle}`,
-        spokenFeedback: `Switched to ${targetTitle}.`,
+        spokenFeedback: '',
         timeMs: Math.round(performance.now() - startTime),
       }
     }
@@ -132,7 +211,6 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       await chrome.tabs.create({ url: targetUrl, active: true })
     }
 
-    // If user asked to login in student portal
     if (cmd.includes('login') || cmd.includes('sign in')) {
       return {
         handled: true,
@@ -156,18 +234,21 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       isFastPath: true,
       tier: 'tier1',
       actionName: 'open_direct_domain',
-      statusMessage: `Navigated directly to ${targetTitle} (${targetUrl})`,
-      spokenFeedback: `Opening ${targetTitle}.`,
+      statusMessage: `Navigated directly to ${targetTitle}`,
+      spokenFeedback: '',
       timeMs: Math.round(performance.now() - startTime),
     }
   }
 
-  // 2. YouTube specific commands (channels, searches, creator pages)
-  if (cmd.includes('youtube') || cmd.includes('mrbeast') || cmd.includes('mr beast')) {
+  // 5. YouTube specific commands (Sidemen, MrBeast, channels, searches)
+  if (cmd.includes('youtube') || cmd.includes('mrbeast') || cmd.includes('mr beast') || cmd.includes('sidemen')) {
     let targetUrl = 'https://www.youtube.com'
     let targetLabel = 'YouTube'
 
-    if (cmd.includes('mrbeast') || cmd.includes('mr beast')) {
+    if (cmd.includes('sidemen')) {
+      targetUrl = 'https://www.youtube.com/results?search_query=latest+sidemen+video'
+      targetLabel = 'Latest Sidemen Video'
+    } else if (cmd.includes('mrbeast') || cmd.includes('mr beast')) {
       targetUrl = 'https://www.youtube.com/@MrBeast'
       targetLabel = 'MrBeast YouTube Channel'
     } else {
@@ -204,8 +285,8 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
         isFastPath: true,
         tier: 'tier1',
         actionName: 'switch_to_youtube',
-        statusMessage: `Switched to open tab: ${targetLabel}`,
-        spokenFeedback: `Switched to ${targetLabel}.`,
+        statusMessage: `Switched to tab: ${targetLabel}`,
+        spokenFeedback: '',
         timeMs: Math.round(performance.now() - startTime),
       }
     }
@@ -220,12 +301,12 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       tier: 'tier1',
       actionName: 'open_youtube_destination',
       statusMessage: `Navigated to ${targetLabel}`,
-      spokenFeedback: `Opening ${targetLabel}.`,
+      spokenFeedback: '',
       timeMs: Math.round(performance.now() - startTime),
     }
   }
 
-  // 3. Open Wordle (Deduplicate if already open)
+  // 6. Open Wordle (Deduplicate if already open)
   if (cmd.includes('open wordle') || cmd === 'wordle') {
     const wordleUrl = 'https://www.nytimes.com/games/wordle/index.html'
     const existing = await findExistingTab('wordle')
@@ -243,7 +324,7 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
         tier: 'tier1',
         actionName: 'switch_to_wordle',
         statusMessage: 'Switched to existing Wordle tab',
-        spokenFeedback: 'Wordle is already open. Switched to it.',
+        spokenFeedback: '',
         timeMs: Math.round(performance.now() - startTime),
       }
     }
@@ -257,12 +338,12 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       tier: 'tier1',
       actionName: 'open_wordle',
       statusMessage: 'Opened Wordle in a new tab',
-      spokenFeedback: 'Opening Wordle.',
+      spokenFeedback: '',
       timeMs: Math.round(performance.now() - startTime),
     }
   }
 
-  // 4. Open History
+  // 7. Open History
   if (cmd === 'open history' || cmd === 'view history' || cmd === 'show history') {
     const historyUrl = 'chrome://history'
     const existing = await findExistingTab('chrome://history')
@@ -277,7 +358,7 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
         tier: 'tier1',
         actionName: 'switch_history',
         statusMessage: 'Switched to open History tab',
-        spokenFeedback: 'Switched to your history tab.',
+        spokenFeedback: '',
         timeMs: Math.round(performance.now() - startTime),
       }
     }
@@ -291,12 +372,12 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       tier: 'tier1',
       actionName: 'open_history',
       statusMessage: 'Opened Chrome History',
-      spokenFeedback: 'Opening history.',
+      spokenFeedback: '',
       timeMs: Math.round(performance.now() - startTime),
     }
   }
 
-  // 5. Web Search Queries (ONLY when explicitly searching)
+  // 8. Web Search Queries
   if (cmd.startsWith('search for ') || cmd.startsWith('google ')) {
     const query = cmd
       .replace(/^search for\s*/i, '')
@@ -314,13 +395,13 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
         tier: 'tier1',
         actionName: 'web_search',
         statusMessage: `Searching Google for: "${query}"`,
-        spokenFeedback: `Searching for ${query}.`,
+        spokenFeedback: '',
         timeMs: Math.round(performance.now() - startTime),
       }
     }
   }
 
-  // 6. Close Current Tab
+  // 9. Close Current Tab
   if (cmd === 'close current tab' || cmd === 'close this tab' || cmd === 'close tab') {
     if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.remove) {
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -334,12 +415,12 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       tier: 'tier1',
       actionName: 'close_current_tab',
       statusMessage: 'Closed active tab',
-      spokenFeedback: 'Closed tab.',
+      spokenFeedback: '',
       timeMs: Math.round(performance.now() - startTime),
     }
   }
 
-  // 7. Mute / Unmute YouTube or active audio tab
+  // 10. Mute / Unmute YouTube or active audio tab
   if (cmd.includes('mute youtube') || cmd === 'mute audio' || cmd === 'mute current tab') {
     let mutedCount = 0
     if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.update) {
@@ -364,7 +445,7 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       tier: 'tier1',
       actionName: 'mute_tab',
       statusMessage: mutedCount > 0 ? `Muted ${mutedCount} audio tab(s)` : 'Muted current tab',
-      spokenFeedback: 'Muted audio.',
+      spokenFeedback: '',
       timeMs: Math.round(performance.now() - startTime),
     }
   }
@@ -384,12 +465,12 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       tier: 'tier1',
       actionName: 'unmute_tab',
       statusMessage: 'Unmuted active audio tabs',
-      spokenFeedback: 'Unmuted.',
+      spokenFeedback: '',
       timeMs: Math.round(performance.now() - startTime),
     }
   }
 
-  // 8. Switch to Tab
+  // 11. Switch to Tab
   if (cmd.startsWith('switch to tab') || cmd.startsWith('switch to')) {
     const target = cmd.replace(/^switch to tab\s*/, '').replace(/^switch to\s*/, '').trim()
     if (target) {
@@ -407,14 +488,14 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
           tier: 'tier1',
           actionName: 'switch_tab',
           statusMessage: `Switched to tab: ${existing.title || target}`,
-          spokenFeedback: `Switched to ${target}.`,
+          spokenFeedback: '',
           timeMs: Math.round(performance.now() - startTime),
         }
       }
     }
   }
 
-  // 9. Generic deduplicated quick open for common apps
+  // 12. Generic deduplicated quick open for common apps
   const quickApps: Record<string, string> = {
     github: 'https://github.com',
     google: 'https://www.google.com',
@@ -443,7 +524,7 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
           tier: 'tier1',
           actionName: `switch_${appKey}`,
           statusMessage: `Focused existing ${appKey} tab`,
-          spokenFeedback: `Switched to ${appKey}.`,
+          spokenFeedback: '',
           timeMs: Math.round(performance.now() - startTime),
         }
       }
@@ -457,13 +538,13 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
         tier: 'tier1',
         actionName: `open_${appKey}`,
         statusMessage: `Opened ${appKey}`,
-        spokenFeedback: `Opening ${appKey}.`,
+        spokenFeedback: '',
         timeMs: Math.round(performance.now() - startTime),
       }
     }
   }
 
-  // 10. Destructive actions inspection (Tier 2 Trigger)
+  // 13. Destructive actions inspection (Tier 2 Trigger)
   if (cmd.includes('close all other tabs') || cmd === 'close other tabs') {
     let tabCount = 0
     if (typeof chrome !== 'undefined' && chrome.tabs?.query) {

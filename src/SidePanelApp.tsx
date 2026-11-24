@@ -10,6 +10,9 @@ import {
   AlertCircle,
   ExternalLink,
   AudioWaveform,
+  Layers,
+  X,
+  Check,
 } from 'lucide-react'
 
 import { Card, CardBody, CardFooter } from '@/components/ui/card'
@@ -24,6 +27,7 @@ import {
   ComplicationDetails,
   ExecutionLogEntry,
   PageSnapshot,
+  ProductComparisonItem,
   RouterExecutionResult,
 } from '@/types'
 
@@ -44,27 +48,33 @@ export function SidePanelApp() {
   const [ttsEnabled, setTtsEnabled] = useState<boolean>(true)
   const [textCommand, setTextCommand] = useState<string>('')
 
-  // Autonomy state
+  // Autonomy & Comparison state
   const [activeConfirmation, setActiveConfirmation] = useState<ConfirmationDetails | null>(null)
   const [confirmInput, setConfirmInput] = useState<string>('')
   const [activeComplication, setActiveComplication] = useState<ComplicationDetails | null>(null)
   const [currentStepInfo, setCurrentStepInfo] = useState<{ step: number; total: number; title: string } | null>(null)
+  const [comparisonResults, setComparisonResults] = useState<ProductComparisonItem[] | null>(null)
 
   // Execution Log
   const [logs, setLogs] = useState<ExecutionLogEntry[]>([
     {
       id: 'init-1',
       timestamp: Date.now() - 5000,
-      command: 'System ready: Whisper Flow audio dictation engine loaded',
+      command: 'System ready: Local Fast-Path & Bedrock engine initialized',
       tier: 'tier1',
       status: 'completed',
-      detail: 'Local fast-path and Whisper audio pipeline initialized',
+      detail: 'Whisper Flow audio capture and dual-speed router loaded',
       timeMs: 4,
     },
   ])
 
-  // Settings state
+  // Settings state (Bedrock + Gemini + ElevenLabs + Whisper)
   const [showSettings, setShowSettings] = useState<boolean>(false)
+  const [aiBrain, setAiBrain] = useState<'bedrock' | 'gemini' | 'local'>('bedrock')
+  const [bedrockModel, setBedrockModel] = useState<string>('amazon.nova-lite-v1:0')
+  const [awsProxyUrl, setAwsProxyUrl] = useState<string>('')
+  const [elevenLabsApiKey, setElevenLabsApiKey] = useState<string>('')
+  const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState<string>('21m00Tcm4TlvDq8ikWAM')
   const [apiKey, setApiKey] = useState<string>('')
   const [model, setModel] = useState<string>('gemini-2.0-flash')
   const [whisperEndpoint, setWhisperEndpoint] = useState<string>('')
@@ -92,6 +102,11 @@ export function SidePanelApp() {
     getSettings().then((s) => {
       setApiKey(s.apiKey)
       setModel(s.model)
+      setAiBrain(s.aiBrain)
+      setBedrockModel(s.bedrockModel)
+      setAwsProxyUrl(s.awsProxyUrl)
+      setElevenLabsApiKey(s.elevenLabsApiKey)
+      setElevenLabsVoiceId(s.elevenLabsVoiceId)
       setWhisperEndpoint(s.whisperEndpoint || '')
     })
   }, [])
@@ -240,6 +255,11 @@ export function SidePanelApp() {
         ),
       )
       return
+    }
+
+    // Cross-Tab Comparison: Store items to display side-by-side comparison table
+    if (result.actionName === 'compare_tabs' && result.data?.items) {
+      setComparisonResults(result.data.items as ProductComparisonItem[])
     }
 
     // Tier 1: Instant execution (Completely silent)
@@ -493,14 +513,21 @@ export function SidePanelApp() {
   return (
     <div className="relative flex min-h-screen flex-col bg-background font-manrope text-foreground">
       {/* 1. Sticky Transparent Header with Blur */}
-      <header className="sticky top-0 z-30 flex h-13 w-full items-center justify-between border-b border-card-edge bg-background/80 px-4 py-2.5 backdrop-blur-md">
-        {/* Left: Onest Wordmark */}
+      <header className="sticky top-0 z-30 flex h-14 w-full items-center justify-between border-b border-card-edge bg-background/80 px-4 py-2 backdrop-blur-md">
+        {/* Left: Onest Wordmark + Team Jupiter2011 Hackathon info */}
         <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-md border border-neutral-300 dark:border-neutral-800">
+          <span className="flex size-7 items-center justify-center rounded-md border border-neutral-300 dark:border-neutral-800">
             <span className="size-2 rounded-full bg-brand" />
           </span>
-          <h1 className="font-onest text-sm font-bold tracking-tight text-foreground">VoxPilot</h1>
-          <span className="text-[10px] text-muted-foreground font-mono">Whisper</span>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <h1 className="font-onest text-sm font-bold tracking-tight text-foreground">VoxPilot</h1>
+              <span className="text-[9px] text-muted-foreground font-mono uppercase border border-neutral-200 dark:border-neutral-800 px-1 rounded">MV3</span>
+            </div>
+            <span className="text-[9px] text-muted-foreground font-mono leading-none">
+              Jupiter2011 · wHACKiest '26
+            </span>
+          </div>
         </div>
 
         {/* Right Controls: Settings and Half-Circle Theme Switcher */}
@@ -545,7 +572,7 @@ export function SidePanelApp() {
           <span className="font-montserrat font-medium tracking-tight capitalize text-yellow-800 dark:text-orange-100">
             zero latency local autonomy
           </span>
-          , structured tool calling, and human complication handoffs.
+          , Amazon Nova 2 Lite tool calling, and human complication handoffs.
         </p>
 
         {/* 2. Central Whisper Flow Voice Listening Card */}
@@ -593,7 +620,7 @@ export function SidePanelApp() {
                     return (
                       <span
                         key={idx}
-                        className="w-1 rounded-full bg-yellow-600 dark:bg-orange-200 transition-all duration-75"
+                        className="w-1 rounded-full bg-neutral-800 dark:bg-neutral-200 transition-all duration-75"
                         style={{ height: `${scaled}px` }}
                       />
                     )
@@ -680,42 +707,28 @@ export function SidePanelApp() {
               </Button>
             </form>
 
-            {/* Quick Voice & Action Chips */}
+            {/* Quick Voice & Action Chips matching Hackathon PPT Workflows */}
             <div className="flex flex-wrap gap-1.5 pt-1">
               <button
                 type="button"
-                onClick={() => executeCommand('open mrbeast youtube channel')}
+                onClick={() => executeCommand('play latest sidemen video')}
                 className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               >
-                MrBeast YouTube
+                Sidemen video
               </button>
               <button
                 type="button"
-                onClick={() => executeCommand('open wordle')}
+                onClick={() => executeCommand('skip ad')}
                 className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               >
-                Open Wordle
+                Skip ad
               </button>
               <button
                 type="button"
-                onClick={() => executeCommand('open history')}
+                onClick={() => executeCommand('pause')}
                 className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               >
-                Open history
-              </button>
-              <button
-                type="button"
-                onClick={() => executeCommand('mute youtube')}
-                className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Mute YouTube
-              </button>
-              <button
-                type="button"
-                onClick={() => executeCommand('delete my shopping history from the last hour')}
-                className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Clear shopping history
+                Pause video
               </button>
               <button
                 type="button"
@@ -726,14 +739,103 @@ export function SidePanelApp() {
               </button>
               <button
                 type="button"
+                onClick={() => executeCommand('open parents.msrit.edu')}
+                className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                MSRIT portal
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCommand('open wordle')}
+                className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Open Wordle
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCommand('delete my shopping history from the last hour')}
+                className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Clear history
+              </button>
+              <button
+                type="button"
                 onClick={() => executeCommand('demo complication at checkout')}
                 className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               >
-                Demo CAPTCHA blocker
+                Demo CAPTCHA
               </button>
             </div>
           </CardBody>
         </Card>
+
+        {/* 2.5 Cross-Tab Product Comparison Card (PPT Core Feature) */}
+        <AnimatePresence>
+          {comparisonResults && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.25 }}
+            >
+              <Card className="border-card-edge bg-card-fill">
+                <CardBody className="p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-montserrat text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Layers className="size-3.5 text-muted-foreground" />
+                      Cross-Tab Product Comparison
+                    </span>
+                    <button
+                      onClick={() => setComparisonResults(null)}
+                      className="text-muted-foreground hover:text-foreground text-xs p-1"
+                      title="Close comparison"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Scanned open product tabs in parallel with Amazon Nova 2 Lite:
+                  </p>
+
+                  <div className="space-y-2">
+                    {comparisonResults.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="rounded-lg border border-neutral-200 dark:border-neutral-800/80 bg-neutral-50/50 dark:bg-black/30 p-2.5 text-xs space-y-1.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="font-montserrat font-semibold text-foreground text-xs leading-tight">
+                            {item.title}
+                          </div>
+                          <span className="font-mono text-xs font-bold text-yellow-800 dark:text-orange-100 shrink-0">
+                            {item.price}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1">
+                          {item.specs.map((spec, sIdx) => (
+                            <span
+                              key={sIdx}
+                              className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/70 dark:bg-neutral-900/70 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                            >
+                              {spec}
+                            </span>
+                          ))}
+                        </div>
+
+                        <div className="text-[11px] font-medium text-green-700 dark:text-green-400 flex items-center gap-1">
+                          <span className="size-1 rounded-full bg-green-500" />
+                          <span>Verdict: {item.verdict}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardBody>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* 3. Tier 3 Visual Complication Handoff Card (When active) */}
         <AnimatePresence>
@@ -840,6 +942,12 @@ export function SidePanelApp() {
             })}
           </div>
         </div>
+        {/* Hackathon Footer Attribution */}
+        <footer className="pt-2 pb-1 border-t border-card-edge text-center text-[10px] text-muted-foreground flex items-center justify-between">
+          <span>Team Jupiter2011</span>
+          <span>Ramaiah Institute of Technology</span>
+          <span>Track 2</span>
+        </footer>
       </main>
 
       {/* 5. Tier 2 Scoped Confirmation Dialog (Safe-first focus + optional type-to-confirm) */}
@@ -902,36 +1010,119 @@ export function SidePanelApp() {
         </div>
       </Dialog>
 
-      {/* 6. Settings Dialog */}
+      {/* 6. Settings Dialog (Amazon Bedrock + Gemini + ElevenLabs + Whisper) */}
       <Dialog
         open={showSettings}
         onClose={() => setShowSettings(false)}
         title="VoxPilot Settings"
-        description="Configure Gemini API key, model, and Whisper Flow endpoints."
+        description="Configure Amazon Bedrock, Google Gemini, ElevenLabs, and Whisper Flow."
       >
-        <div className="mt-3 space-y-3 text-xs">
+        <div className="mt-3 space-y-3 text-xs max-h-[70vh] overflow-y-auto pr-1">
+          {/* AI Brain Selection */}
           <div className="space-y-1">
-            <label className="text-[11px] font-medium text-foreground">Gemini API Key</label>
+            <label className="text-[11px] font-medium text-foreground">AI Reasoning Engine</label>
+            <div className="grid grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setAiBrain('bedrock')}
+                className={`rounded border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                  aiBrain === 'bedrock'
+                    ? 'border-yellow-600 bg-neutral-900 text-yellow-500 dark:border-orange-200/60 dark:bg-neutral-900 dark:text-orange-100'
+                    : 'border-neutral-200 dark:border-neutral-800 text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Amazon Bedrock
+              </button>
+              <button
+                type="button"
+                onClick={() => setAiBrain('gemini')}
+                className={`rounded border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                  aiBrain === 'gemini'
+                    ? 'border-yellow-600 bg-neutral-900 text-yellow-500 dark:border-orange-200/60 dark:bg-neutral-900 dark:text-orange-100'
+                    : 'border-neutral-200 dark:border-neutral-800 text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Google Gemini
+              </button>
+              <button
+                type="button"
+                onClick={() => setAiBrain('local')}
+                className={`rounded border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                  aiBrain === 'local'
+                    ? 'border-yellow-600 bg-neutral-900 text-yellow-500 dark:border-orange-200/60 dark:bg-neutral-900 dark:text-orange-100'
+                    : 'border-neutral-200 dark:border-neutral-800 text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Local / Ollama
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {aiBrain === 'bedrock'
+                ? 'Amazon Nova 2 Lite via AWS Lambda Function URL proxy (low cost and zero-cloud cookies).'
+                : aiBrain === 'gemini'
+                ? 'Direct Gemini 2.0 Flash client calling.'
+                : 'Local offline LLM or custom endpoint.'}
+            </p>
+          </div>
+
+          {/* AWS Lambda Proxy URL */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-foreground">AWS Lambda Proxy URL</label>
+            <Input
+              value={awsProxyUrl}
+              onChange={(e) => setAwsProxyUrl(e.target.value)}
+              placeholder="https://xyz.lambda-url.us-east-1.on.aws"
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Stateless Node.js Function URL proxy securing Bedrock credentials.
+            </p>
+          </div>
+
+          {/* Bedrock Model */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-foreground">Bedrock Model ID</label>
+            <Input
+              value={bedrockModel}
+              onChange={(e) => setBedrockModel(e.target.value)}
+              placeholder="amazon.nova-lite-v1:0"
+            />
+          </div>
+
+          {/* ElevenLabs API Key & Voice ID */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-foreground">ElevenLabs API Key</label>
+            <Input
+              type="password"
+              value={elevenLabsApiKey}
+              onChange={(e) => setElevenLabsApiKey(e.target.value)}
+              placeholder="xi-..."
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Powers low-latency Flash v2.5 / Eleven v4 Turbo streaming voice responses.
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-foreground">ElevenLabs Voice ID</label>
+            <Input
+              value={elevenLabsVoiceId}
+              onChange={(e) => setElevenLabsVoiceId(e.target.value)}
+              placeholder="21m00Tcm4TlvDq8ikWAM"
+            />
+          </div>
+
+          {/* Gemini API Key */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-foreground">Gemini API Key (Fallback)</label>
             <Input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="AIzaSy..."
             />
-            <p className="text-[10px] text-muted-foreground">
-              Stored locally in Chrome extension storage.
-            </p>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-[11px] font-medium text-foreground">LLM Model</label>
-            <Input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="gemini-2.0-flash"
-            />
-          </div>
-
+          {/* Whisper Endpoint URL */}
           <div className="space-y-1">
             <label className="text-[11px] font-medium text-foreground">Whisper Endpoint URL (Optional)</label>
             <Input
@@ -956,7 +1147,16 @@ export function SidePanelApp() {
               variant="solid"
               size="sm"
               onClick={async () => {
-                await saveSettings(apiKey, model, whisperEndpoint)
+                await saveSettings(
+                  apiKey,
+                  model,
+                  whisperEndpoint,
+                  aiBrain,
+                  bedrockModel,
+                  awsProxyUrl,
+                  elevenLabsApiKey,
+                  elevenLabsVoiceId,
+                )
                 setShowSettings(false)
               }}
             >
