@@ -42,6 +42,147 @@ async function findExistingTab(query: string): Promise<chrome.tabs.Tab | null> {
 }
 
 /**
+ * Safely navigates the current active tab or window to targetUrl without abandoning New Tab.
+ */
+export async function openOrUpdateActiveTab(targetUrl: string): Promise<number> {
+  if (typeof chrome === 'undefined' || !chrome.tabs) return 0
+
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+
+    // If active tab is a new tab or blank, ALWAYS reuse it directly!
+    if (
+      activeTab?.id &&
+      (!activeTab.url ||
+        activeTab.url.startsWith('chrome://newtab') ||
+        activeTab.url.startsWith('chrome://') ||
+        activeTab.url === 'about:blank')
+    ) {
+      await chrome.tabs.update(activeTab.id, { url: targetUrl, active: true })
+      return activeTab.id
+    }
+
+    // Check if a tab with this domain already exists in the CURRENT window
+    let domainHost = ''
+    try {
+      domainHost = new URL(targetUrl).hostname.replace(/^www\./, '')
+    } catch (_) {
+      domainHost = targetUrl
+    }
+
+    const currentWindowTabs = await chrome.tabs.query({ currentWindow: true })
+    const existingInCurrentWindow = currentWindowTabs.find((t) => {
+      const u = (t.url || '').toLowerCase()
+      return domainHost && u.includes(domainHost)
+    })
+
+    if (existingInCurrentWindow?.id) {
+      await chrome.tabs.update(existingInCurrentWindow.id, { url: targetUrl, active: true })
+      return existingInCurrentWindow.id
+    }
+
+    // Otherwise create a new tab in the current window
+    const newTab = await chrome.tabs.create({ url: targetUrl, active: true })
+    return newTab.id || 0
+  } catch (err) {
+    console.warn('[VoxPilot] Tab navigation error:', err)
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      const t = await chrome.tabs.create({ url: targetUrl, active: true })
+      return t.id || 0
+    }
+  }
+  return 0
+}
+
+/**
+ * Injected script that visually highlights Menu -> Others -> Student Information System on msrit.edu
+ * and navigates through to parents.msrit.edu.
+ */
+export async function executeMSRITMultiStepNavigation(tabId: number): Promise<void> {
+  if (typeof chrome === 'undefined' || !chrome.scripting?.executeScript) return
+
+  setTimeout(async () => {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          let attempts = 0
+          const interval = setInterval(() => {
+            attempts++
+            const allLinks = Array.from(document.querySelectorAll('a'))
+
+            const othersLink = allLinks.find((a) => {
+              const text = (a.textContent || '').trim().toLowerCase()
+              return text === 'others' || text === 'other'
+            })
+
+            const sisLink =
+              (document.querySelector('a[href*="parents.msrit.edu"]') as HTMLAnchorElement | null) ||
+              (allLinks.find((a) => /student information system/i.test(a.textContent || '')) as HTMLAnchorElement | null)
+
+            if (othersLink || sisLink || attempts > 15) {
+              clearInterval(interval)
+
+              let banner = document.getElementById('vox-multistep-banner')
+              if (!banner) {
+                banner = document.createElement('div')
+                banner.id = 'vox-multistep-banner'
+                banner.style.position = 'fixed'
+                banner.style.top = '16px'
+                banner.style.left = '50%'
+                banner.style.transform = 'translateX(-50%)'
+                banner.style.zIndex = '999999'
+                banner.style.background = '#0a0a0a'
+                banner.style.color = '#fff'
+                banner.style.border = '1px solid rgba(255, 255, 255, 0.2)'
+                banner.style.borderRadius = '8px'
+                banner.style.padding = '8px 16px'
+                banner.style.fontFamily = 'system-ui, sans-serif'
+                banner.style.fontSize = '12px'
+                banner.style.fontWeight = '600'
+                banner.style.boxShadow = 'none'
+                document.body.appendChild(banner)
+              }
+
+              banner.textContent = 'VoxPilot: Navigating Menu -> Others -> Student Information System...'
+
+              if (othersLink) {
+                othersLink.style.outline = '2px solid #eab308'
+                othersLink.style.outlineOffset = '2px'
+                othersLink.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+                othersLink.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+              }
+
+              setTimeout(() => {
+                if (sisLink) {
+                  sisLink.style.outline = '2px solid #22c55e'
+                  sisLink.style.outlineOffset = '2px'
+                  if (banner) {
+                    banner.textContent = 'VoxPilot: Found Student Information System. Opening portal...'
+                  }
+                  setTimeout(() => {
+                    window.location.href = sisLink.href || 'http://parents.msrit.edu/'
+                  }, 700)
+                } else {
+                  if (banner) {
+                    banner.textContent = 'VoxPilot: Opening Student Information System...'
+                  }
+                  setTimeout(() => {
+                    window.location.href = 'http://parents.msrit.edu/'
+                  }, 500)
+                }
+              }, 600)
+            }
+          }, 200)
+        },
+      })
+    } catch (err) {
+      console.warn('[VoxPilot] Multi-step script error:', err)
+    }
+  }, 600)
+}
+
+/**
  * Known YouTube creator handles.
  */
 const KNOWN_CHANNELS: Record<string, string> = {
@@ -211,86 +352,59 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
     }
   }
 
-  // 4. DIRECT DOMAIN & URL NAVIGATION (e.g. "open msrit.edu", "msrit.edu", "go to github.com")
+  // 4. DIRECT DOMAIN & MSRIT MULTI-STEP NAVIGATION
   const domainMatch = cmd.match(DOMAIN_REGEX)
   if (domainMatch || cmd.includes('msrit')) {
     let domain = domainMatch ? domainMatch[1] : 'msrit.edu'
 
-    // Special handling for MSRIT / Ramaiah student portals
-    let targetUrl = `https://${domain}`
-    let targetTitle = domain
+    const isMSRITMultiStep =
+      cmd.includes('msrit') &&
+      (cmd.includes('student') ||
+        cmd.includes('portal') ||
+        cmd.includes('sis') ||
+        cmd.includes('other') ||
+        cmd.includes('others') ||
+        cmd.includes('menu') ||
+        cmd.includes('login') ||
+        cmd.includes('then') ||
+        cmd.includes('->'))
 
-    if (cmd.includes('student') || cmd.includes('portal') || cmd.includes('login') || cmd.includes('sis') || cmd.includes('erp')) {
-      if (domain.includes('msrit')) {
-        targetUrl = 'https://parents.msrit.edu'
-        targetTitle = 'MSRIT Student Academic Portal'
-      }
-    } else if (domain === 'msrit.edu' || cmd === 'open msrit' || cmd === 'msrit') {
-      targetUrl = 'https://www.msrit.edu'
-      targetTitle = 'Ramaiah Institute of Technology (MSRIT)'
-    }
+    if (isMSRITMultiStep) {
+      // Step 1: Open https://www.msrit.edu in the active/current tab
+      const tabId = await openOrUpdateActiveTab('https://www.msrit.edu')
 
-    // Check if matching tab already exists
-    const existing = await findExistingTab(domain)
-    if (existing && existing.id !== undefined) {
-      if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
-        await chrome.tabs.update(existing.id, { active: true })
-        if (existing.windowId) {
-          await chrome.windows.update(existing.windowId, { focused: true })
-        }
+      // Step 2: Inject the multi-step navigation agent (Menu -> Others -> Student Information System)
+      if (tabId) {
+        await executeMSRITMultiStepNavigation(tabId)
       }
 
-      if (cmd.includes('login') || cmd.includes('sign in')) {
-        return {
-          handled: true,
-          isFastPath: true,
-          tier: 'tier3',
-          actionName: 'navigated_login_portal',
-          statusMessage: `Switched to ${targetTitle}. Paused for credential entry.`,
-          spokenFeedback: `Switched to ${targetTitle}. Manual login required.`,
-          complication: {
-            type: 'login_wall',
-            reason: 'Student portal authentication required. Enter your credentials to continue.',
-            stepIndex: 1,
-            totalSteps: 2,
-          },
-          timeMs: Math.round(performance.now() - startTime),
-        }
-      }
-
-      return {
-        handled: true,
-        isFastPath: true,
-        tier: 'tier1',
-        actionName: 'switch_to_domain',
-        statusMessage: `Switched to open tab: ${targetTitle}`,
-        spokenFeedback: '',
-        timeMs: Math.round(performance.now() - startTime),
-      }
-    }
-
-    // Open the website directly in active tab
-    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
-      await chrome.tabs.create({ url: targetUrl, active: true })
-    }
-
-    if (cmd.includes('login') || cmd.includes('sign in')) {
       return {
         handled: true,
         isFastPath: true,
         tier: 'tier3',
-        actionName: 'open_and_login_portal',
-        statusMessage: `Opened ${targetTitle}. Authentication required.`,
-        spokenFeedback: `Opened ${targetTitle}. Please log in on the page and click Resume.`,
+        actionName: 'navigated_student_portal',
+        statusMessage: 'Opened msrit.edu and navigated Menu -> Others -> Student Information System',
+        spokenFeedback: 'Navigated to Student Information System. Please log in on the page and click Resume.',
         complication: {
           type: 'login_wall',
-          reason: 'Student portal login required. Please sign in to proceed.',
-          stepIndex: 1,
+          reason: 'Student portal authentication required. Enter your credentials on the screen to continue.',
+          stepIndex: 2,
           totalSteps: 2,
         },
         timeMs: Math.round(performance.now() - startTime),
       }
     }
+
+    // Regular single domain navigation
+    let targetUrl = `https://${domain}`
+    let targetTitle = domain
+
+    if (domain === 'msrit.edu' || cmd === 'open msrit' || cmd === 'msrit') {
+      targetUrl = 'https://www.msrit.edu'
+      targetTitle = 'Ramaiah Institute of Technology (MSRIT)'
+    }
+
+    await openOrUpdateActiveTab(targetUrl)
 
     return {
       handled: true,
@@ -459,28 +573,7 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
       }
     }
 
-    const existing = await findExistingTab(targetLabel.toLowerCase())
-    if (existing && existing.id !== undefined) {
-      if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
-        await chrome.tabs.update(existing.id, { active: true })
-        if (existing.windowId) {
-          await chrome.windows.update(existing.windowId, { focused: true })
-        }
-      }
-      return {
-        handled: true,
-        isFastPath: true,
-        tier: 'tier1',
-        actionName: 'switch_to_youtube',
-        statusMessage: `Switched to tab: ${targetLabel}`,
-        spokenFeedback: '',
-        timeMs: Math.round(performance.now() - startTime),
-      }
-    }
-
-    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
-      await chrome.tabs.create({ url: targetUrl, active: true })
-    }
+    await openOrUpdateActiveTab(targetUrl)
 
     return {
       handled: true,

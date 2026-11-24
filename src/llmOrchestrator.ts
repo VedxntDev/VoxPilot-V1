@@ -1,5 +1,5 @@
 import { ComplicationDetails, ConfirmationDetails, PageSnapshot, ProductComparisonItem, RouterExecutionResult } from './types'
-import { resolveLatestYouTubeVideo } from './fastPathRouter'
+import { executeMSRITMultiStepNavigation, openOrUpdateActiveTab, resolveLatestYouTubeVideo } from './fastPathRouter'
 
 export interface LLMToolCall {
   name: string
@@ -255,37 +255,46 @@ export async function routeLLMSlowPath(
     let urlToOpen = `https://${domain}`
     let title = domain
 
-    if (lower.includes('portal') || lower.includes('student') || lower.includes('login') || lower.includes('sis') || lower.includes('erp')) {
-      if (domain.includes('msrit')) {
-        urlToOpen = 'https://parents.msrit.edu'
-        title = 'MSRIT Student Academic Portal'
+    const isMSRITMultiStep =
+      lower.includes('msrit') &&
+      (lower.includes('student') ||
+        lower.includes('portal') ||
+        lower.includes('sis') ||
+        lower.includes('other') ||
+        lower.includes('others') ||
+        lower.includes('menu') ||
+        lower.includes('login') ||
+        lower.includes('then') ||
+        lower.includes('->'))
+
+    if (isMSRITMultiStep) {
+      const tabId = await openOrUpdateActiveTab('https://www.msrit.edu')
+      if (tabId) {
+        await executeMSRITMultiStepNavigation(tabId)
       }
-    } else if (domain === 'msrit.edu') {
-      urlToOpen = 'https://www.msrit.edu'
-      title = 'Ramaiah Institute of Technology'
-    }
-
-    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
-      await chrome.tabs.create({ url: urlToOpen, active: true })
-    }
-
-    if (lower.includes('login') || lower.includes('sign in')) {
       return {
         handled: true,
         isFastPath: false,
         tier: 'tier3',
         actionName: 'portal_login_flow',
-        statusMessage: `Opened ${title}. Paused for credential entry.`,
-        spokenFeedback: `Opened ${title}. Please enter your credentials on the screen.`,
+        statusMessage: 'Opened msrit.edu and navigated Menu -> Others -> Student Information System',
+        spokenFeedback: 'Navigated to Student Information System. Please enter your credentials on the screen.',
         complication: {
           type: 'login_wall',
           reason: 'Student portal authentication required. Enter your credentials to continue.',
-          stepIndex: 1,
+          stepIndex: 2,
           totalSteps: 2,
         },
         timeMs: Math.round(performance.now() - startTime),
       }
     }
+
+    if (domain === 'msrit.edu') {
+      urlToOpen = 'https://www.msrit.edu'
+      title = 'Ramaiah Institute of Technology'
+    }
+
+    await openOrUpdateActiveTab(urlToOpen)
 
     return {
       handled: true,
@@ -383,19 +392,7 @@ export async function routeLLMSlowPath(
       urlToOpen = `https://www.google.com/search?q=${encodeURIComponent(target)}`
     }
 
-    // Check if active tab is already YouTube when opening a YouTube URL
-    let updatedActive = false
-    if (urlToOpen.includes('youtube.com') && typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.update) {
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (activeTab?.id && activeTab.url && activeTab.url.includes('youtube.com')) {
-        await chrome.tabs.update(activeTab.id, { url: urlToOpen, active: true })
-        updatedActive = true
-      }
-    }
-
-    if (!updatedActive && typeof chrome !== 'undefined' && chrome.tabs?.create) {
-      await chrome.tabs.create({ url: urlToOpen, active: true })
-    }
+    await openOrUpdateActiveTab(urlToOpen)
 
     return {
       handled: true,
