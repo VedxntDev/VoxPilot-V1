@@ -711,6 +711,13 @@ export function SidePanelApp() {
             <div className="flex flex-wrap gap-1.5 pt-1">
               <button
                 type="button"
+                onClick={() => executeCommand('open the latest video of mr beast')}
+                className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                MrBeast video
+              </button>
+              <button
+                type="button"
                 onClick={() => executeCommand('play latest sidemen video')}
                 className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               >

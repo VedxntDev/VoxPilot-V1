@@ -1,4 +1,5 @@
 import { ComplicationDetails, ConfirmationDetails, PageSnapshot, ProductComparisonItem, RouterExecutionResult } from './types'
+import { resolveLatestYouTubeVideo } from './fastPathRouter'
 
 export interface LLMToolCall {
   name: string
@@ -349,11 +350,30 @@ export async function routeLLMSlowPath(
     const target = lower.replace(/^(open|go to|show)\s+/i, '').trim()
 
     let urlToOpen = ''
-    if (target.includes('youtube') || target.includes('mrbeast') || target.includes('sidemen')) {
-      if (target.includes('sidemen')) {
-        urlToOpen = 'https://www.youtube.com/results?search_query=latest+sidemen+video'
+    let displayTarget = target
+
+    if (
+      target.includes('youtube') ||
+      target.includes('mrbeast') ||
+      target.includes('mr beast') ||
+      target.includes('sidemen') ||
+      target.includes('video')
+    ) {
+      if (
+        target.includes('video') ||
+        target.includes('latest') ||
+        target.includes('newest') ||
+        target.includes('play')
+      ) {
+        const resolved = await resolveLatestYouTubeVideo(target)
+        urlToOpen = resolved.videoUrl
+        displayTarget = resolved.label
+      } else if (target.includes('sidemen')) {
+        urlToOpen = 'https://www.youtube.com/@Sidemen'
+        displayTarget = 'Sidemen YouTube Channel'
       } else if (target.includes('mrbeast') || target.includes('mr beast')) {
         urlToOpen = 'https://www.youtube.com/@MrBeast'
+        displayTarget = 'MrBeast YouTube Channel'
       } else {
         urlToOpen = `https://www.youtube.com/results?search_query=${encodeURIComponent(target.replace(/youtube|channel/gi, '').trim())}`
       }
@@ -363,7 +383,17 @@ export async function routeLLMSlowPath(
       urlToOpen = `https://www.google.com/search?q=${encodeURIComponent(target)}`
     }
 
-    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+    // Check if active tab is already YouTube when opening a YouTube URL
+    let updatedActive = false
+    if (urlToOpen.includes('youtube.com') && typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.update) {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (activeTab?.id && activeTab.url && activeTab.url.includes('youtube.com')) {
+        await chrome.tabs.update(activeTab.id, { url: urlToOpen, active: true })
+        updatedActive = true
+      }
+    }
+
+    if (!updatedActive && typeof chrome !== 'undefined' && chrome.tabs?.create) {
       await chrome.tabs.create({ url: urlToOpen, active: true })
     }
 
@@ -372,7 +402,7 @@ export async function routeLLMSlowPath(
       isFastPath: false,
       tier: 'tier1',
       actionName: 'navigate_destination',
-      statusMessage: `Navigated to ${target}`,
+      statusMessage: `Navigated to ${displayTarget}`,
       spokenFeedback: '',
       timeMs: Math.round(performance.now() - startTime),
       data: { url: urlToOpen },

@@ -47,8 +47,8 @@ async function findExistingTab(query: string): Promise<chrome.tabs.Tab | null> {
 const KNOWN_CHANNELS: Record<string, string> = {
   mrbeast: 'https://www.youtube.com/@MrBeast',
   'mr beast': 'https://www.youtube.com/@MrBeast',
-  sidemen: 'https://www.youtube.com/results?search_query=latest+sidemen+video',
-  'sidemen video': 'https://www.youtube.com/results?search_query=latest+sidemen+video',
+  sidemen: 'https://www.youtube.com/@Sidemen',
+  'sidemen video': 'https://www.youtube.com/@Sidemen',
   mkbhd: 'https://www.youtube.com/@mkbhd',
   'marques brownlee': 'https://www.youtube.com/@mkbhd',
   veritasium: 'https://www.youtube.com/@veritasium',
@@ -59,6 +59,69 @@ const KNOWN_CHANNELS: Record<string, string> = {
   'lex fridman': 'https://www.youtube.com/@lexfridman',
   huberman: 'https://www.youtube.com/@hubermanlab',
   'huberman lab': 'https://www.youtube.com/@hubermanlab',
+}
+
+/**
+ * Resolves the direct watch URL for the latest video of a YouTube creator or search query.
+ */
+export async function resolveLatestYouTubeVideo(creatorOrQuery: string): Promise<{ videoUrl: string; label: string }> {
+  const lower = creatorOrQuery.toLowerCase().trim()
+  let fetchUrl = ''
+  let label = 'Latest Video'
+
+  if (lower.includes('mrbeast') || lower.includes('mr beast')) {
+    fetchUrl = 'https://www.youtube.com/@MrBeast/videos'
+    label = 'Latest MrBeast Video'
+  } else if (lower.includes('sidemen')) {
+    fetchUrl = 'https://www.youtube.com/@Sidemen/videos'
+    label = 'Latest Sidemen Video'
+  } else if (lower.includes('mkbhd') || lower.includes('marques')) {
+    fetchUrl = 'https://www.youtube.com/@mkbhd/videos'
+    label = 'Latest MKBHD Video'
+  } else if (lower.includes('veritasium')) {
+    fetchUrl = 'https://www.youtube.com/@veritasium/videos'
+    label = 'Latest Veritasium Video'
+  } else if (lower.includes('pewdiepie')) {
+    fetchUrl = 'https://www.youtube.com/@PewDiePie/videos'
+    label = 'Latest PewDiePie Video'
+  } else {
+    const cleanQ = lower.replace(/open|play|watch|the|latest|video|of|on youtube|youtube/gi, '').trim()
+    fetchUrl = `https://www.youtube.com/results?search_query=latest+${encodeURIComponent(cleanQ || lower)}+video`
+    label = `Latest ${cleanQ || lower} Video`
+  }
+
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2000)
+
+    const res = await fetch(fetchUrl, {
+      signal: controller.signal,
+      headers: {
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    })
+    clearTimeout(timeout)
+
+    const html = await res.text()
+    // Match watch?v=XXXXXXXXXXX or "videoId":"XXXXXXXXXXX"
+    const match = html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/) || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)
+    if (match && match[1]) {
+      return {
+        videoUrl: `https://www.youtube.com/watch?v=${match[1]}`,
+        label,
+      }
+    }
+  } catch (err) {
+    console.warn('[VoxPilot] Fast video fetch error:', err)
+  }
+
+  // Fallback: If direct video ID couldn't be parsed, navigate to search results
+  return {
+    videoUrl: fetchUrl.includes('/results')
+      ? fetchUrl
+      : `https://www.youtube.com/results?search_query=latest+${encodeURIComponent(lower)}+video`,
+    label,
+  }
 }
 
 /**
@@ -240,17 +303,141 @@ export async function routeFastPath(rawCommand: string): Promise<RouterExecution
     }
   }
 
-  // 5. YouTube specific commands (Sidemen, MrBeast, channels, searches)
-  if (cmd.includes('youtube') || cmd.includes('mrbeast') || cmd.includes('mr beast') || cmd.includes('sidemen')) {
+  // 5. YouTube specific commands (Sidemen, MrBeast, channels, searches, and latest videos)
+  const isYouTubeRelated =
+    cmd.includes('youtube') ||
+    cmd.includes('mrbeast') ||
+    cmd.includes('mr beast') ||
+    cmd.includes('sidemen') ||
+    cmd.includes('video') ||
+    cmd.startsWith('play ') ||
+    cmd.startsWith('watch ')
+
+  if (isYouTubeRelated) {
+    const isLatestVideo =
+      cmd.includes('latest video') ||
+      cmd.includes('newest video') ||
+      cmd.includes('play latest') ||
+      cmd.includes('latest mrbeast') ||
+      cmd.includes('latest sidemen') ||
+      (cmd.includes('latest') && (cmd.includes('video') || cmd.includes('upload'))) ||
+      ((cmd.startsWith('play ') || cmd.startsWith('watch ') || cmd.startsWith('open ')) &&
+        (cmd.includes('video') || cmd.includes('latest')))
+
+    if (isLatestVideo) {
+      // Step A: If the active tab is already a YouTube page, try fast on-page video click
+      if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.scripting?.executeScript) {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+        if (activeTab?.id && activeTab.url && activeTab.url.includes('youtube.com')) {
+          const clickResults = await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: () => {
+              const link = document.querySelector(
+                'ytd-channel-video-player-renderer a[href*="/watch"], ' +
+                '#video-title[href*="/watch"], ' +
+                'a#video-title-link[href*="/watch"], ' +
+                'ytd-rich-item-renderer a[href*="/watch"], ' +
+                'ytd-video-renderer a[href*="/watch"], ' +
+                'a[href*="/watch?v="]'
+              ) as HTMLAnchorElement | null
+              if (link && link.href) {
+                link.click()
+                return link.href
+              }
+              return null
+            },
+          }).catch(() => null)
+
+          const clickedUrl = clickResults?.[0]?.result
+          if (clickedUrl) {
+            return {
+              handled: true,
+              isFastPath: true,
+              tier: 'tier1',
+              actionName: 'play_latest_video',
+              statusMessage: 'Opened latest video directly on active page',
+              spokenFeedback: '',
+              timeMs: Math.round(performance.now() - startTime),
+              data: { url: clickedUrl },
+            }
+          }
+        }
+      }
+
+      // Step B: Resolve the exact watch URL for the latest video
+      const resolved = await resolveLatestYouTubeVideo(cmd)
+      const targetUrl = resolved.videoUrl
+      const targetLabel = resolved.label
+
+      let targetTabId: number | undefined
+      let navigatedTab = false
+
+      if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.update) {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+        if (activeTab?.id && activeTab.url && activeTab.url.includes('youtube.com')) {
+          await chrome.tabs.update(activeTab.id, { url: targetUrl, active: true })
+          targetTabId = activeTab.id
+          navigatedTab = true
+        }
+      }
+
+      if (!navigatedTab) {
+        const existing = await findExistingTab('youtube.com')
+        if (existing && existing.id !== undefined) {
+          if (typeof chrome !== 'undefined' && chrome.tabs?.update) {
+            await chrome.tabs.update(existing.id, { url: targetUrl, active: true })
+            targetTabId = existing.id
+            if (existing.windowId) {
+              await chrome.windows.update(existing.windowId, { focused: true })
+            }
+            navigatedTab = true
+          }
+        } else if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+          const newTab = await chrome.tabs.create({ url: targetUrl, active: true })
+          targetTabId = newTab.id
+          navigatedTab = true
+        }
+      }
+
+      // Safety net: if targetUrl was a search or videos listing, click first video when loaded
+      if (targetTabId && (targetUrl.includes('/results') || targetUrl.includes('/videos'))) {
+        setTimeout(() => {
+          if (typeof chrome !== 'undefined' && chrome.scripting?.executeScript) {
+            chrome.scripting.executeScript({
+              target: { tabId: targetTabId! },
+              func: () => {
+                const link = document.querySelector(
+                  'ytd-video-renderer a[href*="/watch"], ytd-rich-item-renderer a[href*="/watch"], a#video-title[href*="/watch"]'
+                ) as HTMLAnchorElement | null
+                if (link) link.click()
+              },
+            }).catch(() => {})
+          }
+        }, 1200)
+      }
+
+      return {
+        handled: true,
+        isFastPath: true,
+        tier: 'tier1',
+        actionName: 'open_latest_video',
+        statusMessage: `Opened ${targetLabel}`,
+        spokenFeedback: '',
+        timeMs: Math.round(performance.now() - startTime),
+        data: { url: targetUrl },
+      }
+    }
+
+    // Step C: Regular channel or search navigation
     let targetUrl = 'https://www.youtube.com'
     let targetLabel = 'YouTube'
 
-    if (cmd.includes('sidemen')) {
-      targetUrl = 'https://www.youtube.com/results?search_query=latest+sidemen+video'
-      targetLabel = 'Latest Sidemen Video'
-    } else if (cmd.includes('mrbeast') || cmd.includes('mr beast')) {
+    if (cmd.includes('mrbeast') || cmd.includes('mr beast')) {
       targetUrl = 'https://www.youtube.com/@MrBeast'
       targetLabel = 'MrBeast YouTube Channel'
+    } else if (cmd.includes('sidemen')) {
+      targetUrl = 'https://www.youtube.com/@Sidemen'
+      targetLabel = 'Sidemen YouTube Channel'
     } else {
       for (const [name, url] of Object.entries(KNOWN_CHANNELS)) {
         if (cmd.includes(name)) {
