@@ -6,6 +6,31 @@
 [![ChaiUI Compliant](https://img.shields.io/badge/Design-ChaiUI%20Strict-orange.svg)](https://ui.chaicode.com)
 [![Vite](https://img.shields.io/badge/Bundler-Vite%206-purple.svg)](https://vitejs.dev/)
 [![React](https://img.shields.io/badge/UI-React%2018%20%2B%20Tailwind-blue.svg)](https://react.dev/)
+[![Download Extension](https://img.shields.io/badge/Direct%20Download-voxpilot--extension.zip-22c55e?style=flat-square&logo=googlechrome&logoColor=white)](https://github.com/VedxntDev/VoxPilot-V1/raw/main/voxpilot-extension.zip)
+
+---
+
+## ⚡ 1-Click Install for Google Chrome (No Terminal Required)
+
+Want to try VoxPilot immediately? You do not need to install Node.js, clone git, or run terminal commands.
+
+[![Download VoxPilot Extension](https://img.shields.io/badge/Download-VoxPilot%20Extension%20(.zip)-22c55e?style=for-the-badge&logo=googlechrome&logoColor=white)](https://github.com/VedxntDev/VoxPilot-V1/raw/main/voxpilot-extension.zip)
+
+> **[👉 Click here to download voxpilot-extension.zip](https://github.com/VedxntDev/VoxPilot-V1/raw/main/voxpilot-extension.zip)** (the file will download automatically).
+
+### How to Load in Chrome (Under 30 Seconds)
+
+1. **Download:** Click the link above to download **`voxpilot-extension.zip`** directly to your computer.
+2. **Unzip:** Double-click the downloaded zip file to extract the **`voxpilot-extension`** folder.
+3. **Open Chrome Extension Settings:**
+   - In Google Chrome, go to `chrome://extensions` in the address bar (or click Chrome menu > **Extensions** > **Manage extensions**).
+   - Turn on the **Developer mode** toggle in the top-right corner.
+4. **Load the Unpacked Folder:**
+   - Click the **Load unpacked** button in the top-left corner.
+   - Select the extracted **`voxpilot-extension`** folder.
+5. **Open VoxPilot:**
+   - Press **`Shift + ⌘ + V`** (macOS) or **`Shift + Ctrl + V`** (Windows/Linux) to open the Side Panel.
+   - You can also pin VoxPilot from the puzzle icon in your Chrome toolbar.
 
 ---
 
@@ -19,6 +44,7 @@ Traditional browser agents run inside heavy remote cloud virtual machines (VMs) 
    - Users issue complete single-breath instructions (for example: *"Hey Vox, clear my shopping history from the last hour and open Wordle"*).
    - Fast push-to-talk shortcut (`Shift+Cmd+V` on macOS, `Shift+Ctrl+V` on Windows/Linux) designed for noisy hackathon venues.
    - Hardware-level barge-in: speaking while text-to-speech (TTS) is playing immediately cancels audio synthesis so the assistant never talks over you.
+   - Routine actions execute silently; voice output is reserved strictly for emergency blockers or required user confirmations.
 2. **Two-Speed Hybrid Router:**
    - **Local Fast-Path (<150 ms):** Deterministic parser inside the extension for immediate browser actions without waiting for an LLM network roundtrip.
    - **LLM Slow-Path (Structured Tool Calling):** Multi-step, selective, and cross-tab reasoning routed to Google Gemini with strict JSON tool schemas.
@@ -132,9 +158,9 @@ VoxPilot introduces a structured three-tier execution hierarchy to ensure user s
 
 | Tier | Level | Examples | Behavior |
 | :--- | :--- | :--- | :--- |
-| **Tier 1** | **Instant** | Switch tab, open Wordle, mute YouTube, summarize page | Executes immediately with brief spoken audio confirmation. |
-| **Tier 2** | **Scoped Confirm** | Delete shopping history, close background tabs | Inspects exact count of affected items first. Displays modal with safe Cancel button focused first. Full history wipes require typing `DELETE`. |
-| **Tier 3** | **Visual Handoff** | CAPTCHAs, 2FA verification, login walls, payments | Pauses agent execution, injects a red spotlight overlay onto the blocking DOM element, and provides a "Resume agent" button. |
+| **Tier 1** | **Instant** | Switch tab, open Wordle, mute YouTube, summarize page | Executes immediately and silently without interruption. |
+| **Tier 2** | **Scoped Confirm** | Delete shopping history, close background tabs | Inspects exact count of affected items first. Displays modal with safe Cancel button focused first. Audio alerts user to confirm. Full history wipes require typing `DELETE`. |
+| **Tier 3** | **Visual Handoff** | CAPTCHAs, 2FA verification, login walls, payments | Pauses agent execution, injects a red spotlight overlay onto the blocking DOM element, announces the blocker aloud, and provides a "Resume agent" button. |
 
 ### Visual Complication Handoff in Action
 When automation hits a CAPTCHA challenge (Cloudflare Turnstile, reCAPTCHA) or an authentication gate:
@@ -162,7 +188,9 @@ VoxPilot strictly adheres to the **ChaiUI** design specification:
 
 ---
 
-## 7. Installation and Development Guide
+## 7. Developer Build Guide (Optional)
+
+If you wish to modify the code or compile from source:
 
 ### Prerequisites
 - Node.js 18+ (tested on Node v24)
@@ -182,21 +210,13 @@ npm install
 npm run build
 ```
 
-The compiled extension is output to the `dist/` directory.
-
-### Loading in Google Chrome
-
-1. Open Chrome and navigate to `chrome://extensions`.
-2. Toggle on **Developer mode** in the top-right corner.
-3. Click **Load unpacked**.
-4. Select the `dist/` directory inside this repository.
-5. Click the extension icon in your toolbar or press **`Shift + ⌘ + V`** (macOS) / **`Shift + Ctrl + V`** (Windows) to open the Side Panel.
+The compiled extension is output to the `dist/` directory, ready to be loaded via **Load unpacked** in `chrome://extensions`.
 
 ---
 
 ## 8. Example Voice Commands
 
-### Instant Fast-Path
+### Instant Fast-Path (Completely Silent)
 - *"Open Wordle"* (switches if already open, else launches)
 - *"Open MrBeast YouTube channel"* (navigates directly to `https://www.youtube.com/@MrBeast`)
 - *"Open msrit.edu"* (direct domain resolution to Ramaiah Institute of Technology)
@@ -204,12 +224,12 @@ The compiled extension is output to the `dist/` directory.
 - *"Mute YouTube"* / *"Mute current tab"*
 - *"Close current tab"*
 
-### Scoped Tier 2 Operations
+### Scoped Tier 2 Operations (Audio Alert & Confirmation)
 - *"Delete my shopping history from the last hour"*
 - *"Close all other tabs"*
 - *"Clear all history"* (requires typing `DELETE` to confirm)
 
-### Complex Tier 3 Workflows
+### Complex Tier 3 Workflows (DOM Spotlight Handoff)
 - *"Open msrit.edu and login in student information system"* (opens portal and triggers login handoff)
 - *"Demo complication at checkout"* (simulates CAPTCHA blocker and injects DOM spotlight)
 
