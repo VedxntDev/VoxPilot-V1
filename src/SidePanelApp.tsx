@@ -185,11 +185,13 @@ export function SidePanelApp() {
     command: string,
     result: RouterExecutionResult,
   ) => {
-    if (result.spokenFeedback) {
+    // Only speak in emergency situations or when direct user input is required (Tier 2 & Tier 3)
+    // Regular Tier 1 actions (opening tabs, switching, muting, searching) remain completely silent.
+    if ((result.tier === 'tier2' || result.tier === 'tier3') && result.spokenFeedback) {
       speakFeedback(result.spokenFeedback)
     }
 
-    // Tier 2: Scoped Confirmation Dialog
+    // Tier 2: Scoped Confirmation Dialog (Requires User Input)
     if (result.tier === 'tier2' && result.confirmation) {
       setActiveConfirmation(result.confirmation)
       setConfirmInput('')
@@ -209,7 +211,7 @@ export function SidePanelApp() {
       return
     }
 
-    // Tier 3: Visual Complication Handoff
+    // Tier 3: Visual Complication Handoff (Emergency / Human Intervention Required)
     if (result.tier === 'tier3' && result.complication) {
       setActiveComplication(result.complication)
       setCurrentStepInfo({
@@ -240,7 +242,7 @@ export function SidePanelApp() {
       return
     }
 
-    // Tier 1: Instant execution
+    // Tier 1: Instant execution (Completely silent)
     setLogs((prev) =>
       prev.map((l) =>
         l.id === logId
@@ -323,14 +325,12 @@ export function SidePanelApp() {
           await chrome.history.deleteUrl({ url: u }).catch(() => {})
         }
       }
-      speakFeedback('Selected history items removed.')
     } else if (actionType === 'close_tabs') {
       if (typeof chrome !== 'undefined' && chrome.tabs?.query && chrome.tabs?.remove) {
         const tabs = await chrome.tabs.query({ currentWindow: true })
         const toClose = tabs.filter((t) => !t.active && t.id !== undefined).map((t) => t.id!)
         await chrome.tabs.remove(toClose)
       }
-      speakFeedback('Closed background tabs.')
     }
 
     setLogs((prev) => [
@@ -366,7 +366,6 @@ export function SidePanelApp() {
       },
       ...prev,
     ])
-    speakFeedback('Action cancelled.')
   }
 
   // Resume Tier 3 Agent execution after user resolves complication
@@ -387,7 +386,6 @@ export function SidePanelApp() {
       timeMs: 42,
     }
     setLogs((prev) => [resumeLog, ...prev])
-    speakFeedback('Resuming agent flow.')
   }
 
   // Whisper Flow Voice Dictation Toggle
@@ -510,8 +508,8 @@ export function SidePanelApp() {
           <button
             onClick={() => setTtsEnabled(!ttsEnabled)}
             className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-            title={ttsEnabled ? 'Mute spoken audio' : 'Enable spoken audio'}
-            aria-label="Toggle spoken audio"
+            title={ttsEnabled ? 'Mute emergency spoken alerts' : 'Enable emergency spoken alerts'}
+            aria-label="Toggle emergency spoken alerts"
           >
             {ttsEnabled ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5 text-neutral-500" />}
           </button>
